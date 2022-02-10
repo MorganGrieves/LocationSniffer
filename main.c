@@ -17,6 +17,7 @@
 #include <curl/curl.h>
 #include <stddef.h>
 #include <fcntl.h>
+#include <linux/if.h>
 
 #define ETH_HEADER_SIZE 14
 
@@ -184,6 +185,9 @@ int send_request(char *host, char **data)
     *data = (char *)malloc(strlen(response_chunk.response) + 1);
     strcpy(*data, response_chunk.response);
 
+    free(response_chunk.response);
+    free(header_chunk.response);
+
     curl_easy_cleanup(curl_loc);
     curl_loc = NULL;
 
@@ -236,6 +240,7 @@ int get_location_by_ip(const char *ip, struct location *loc_res)
 {
     char host[1024];
     char *response;
+    char *response_line_pointer;
 
     const char separator[] = "\n";
     int line_size = 100;
@@ -247,16 +252,18 @@ int get_location_by_ip(const char *ip, struct location *loc_res)
         return -1;
     }
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    response_line_pointer = response;
+
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     if (strcmp(line,"fail") == 0) {
         strcpy(loc_res->status, "fail");
 
-        if ((response = get_line(response, line_size, line)) <= 0)
+        if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
             return -1;
         strcpy(loc_res->message, line);
 
-        if ((response = get_line(response, line_size, line)) <= 0)
+        if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
             return -1;
         strcpy(loc_res->query, line);
 
@@ -264,43 +271,43 @@ int get_location_by_ip(const char *ip, struct location *loc_res)
     }
     strcpy(loc_res->status, "success");
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->continent, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->country, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->regionName, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->city, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->timezone, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->currency, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->organization_name, line);
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     loc_res->proxy = strcmp(line, "true") == 0 ? true : false;
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     loc_res->mobile = strcmp(line, "true") == 0 ? true : false;
 
-    if ((response = get_line(response, line_size, line)) <= 0)
+    if ((response_line_pointer = get_line(response_line_pointer, line_size, line)) <= 0)
         return -1;
     strcpy(loc_res->query, line);
 
@@ -360,29 +367,32 @@ void my_packet_handler(const u_char *packet, unsigned long device_ip)
 
 int main(int argc, char *argv[])
 {
-    char *device;
+    char device[IFNAMSIZ];
     char error_buffer[PCAP_ERRBUF_SIZE];
-    struct pcap_pkthdr packet_header;
+    struct pcap_pkthdr packet_header = {0};
     char *filter = "";
     char my_device_ip[40];
-    const u_char *packet;
+    const u_char *packet = 0;
     struct bpf_program fp; /*compiled filter */
     bpf_u_int32 netp; /* ip address of interface */
     bpf_u_int32 maskp; /* subnet mask of interface */
     struct in_addr address;
+    pcap_if_t *it_device = NULL;
 
     api_lim.X_Rl = -1;
     api_lim.X_Ttl = -1;
 
     cached_ips = tmpfile();
-
     if (!cached_ips) {
         printf("Error: Cannot open temporary file\n");
         exit(EXIT_FAILURE);
     }
 
-    device = pcap_lookupdev(error_buffer);
-    if (device == NULL) {
+    if (pcap_findalldevs(&it_device, error_buffer) == 0) {
+        strcpy(device, it_device->name);
+        printf("device pointer %p\n", it_device);
+        pcap_freealldevs(it_device);
+    } else {
         printf("Error: finding device: %s\n", error_buffer);
         exit(EXIT_FAILURE);
     }
@@ -413,11 +423,11 @@ int main(int argc, char *argv[])
 
     address.s_addr = netp;
     strcpy(my_device_ip, inet_ntoa(address));
-    printf("ip: %s\n", my_device_ip);
     if (my_device_ip == NULL) {
         printf("inet_ntoa: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+    printf("device name: %s, ip: %s\n", device, my_device_ip);
 
     if (pcap_compile(handle, &fp, filter, 0, maskp) == -1) {
         printf("Error: %s", pcap_geterr);
@@ -430,7 +440,6 @@ int main(int argc, char *argv[])
     }
 
     pcap_freecode(&fp);
-
     while (1) {
         packet = pcap_next(handle, &packet_header);
         if (packet)
