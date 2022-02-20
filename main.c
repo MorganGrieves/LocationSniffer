@@ -22,14 +22,6 @@
 #define ETH_HEADER_SIZE 14
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-/*
- * В следующих сериях:
-    3. Написать для rarp, ipv6
-    13. Заменить atoi на strtol
-    14. тесты
-    15. таймер
-*/
-
 FILE *cached_ips;
 pcap_t *handle;
 
@@ -162,7 +154,6 @@ int send_request(char *host, char **data)
     char xrl[100];
     char xttl[100];
 
-    // Move into main() : start
     curl_loc = curl_easy_init();
     if ((curl_loc = curl_easy_init()) == NULL) {
         printf("Error: curl_loc initialization error\n");
@@ -172,9 +163,6 @@ int send_request(char *host, char **data)
     curl_easy_setopt(curl_loc, CURLOPT_URL, host);
     curl_easy_setopt(curl_loc, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl_loc, CURLOPT_HEADERFUNCTION, write_callback);
-
-    curl_easy_cleanup(curl_loc);
-    // Move into main() : end
 
     curl_easy_setopt(curl_loc, CURLOPT_WRITEDATA, &response_chunk);
     curl_easy_setopt(curl_loc, CURLOPT_HEADERDATA, &header_chunk);
@@ -195,6 +183,7 @@ int send_request(char *host, char **data)
     free(response_chunk.response);
     free(header_chunk.response);
 
+    curl_easy_cleanup(curl_loc);
     return 0;
 }
 
@@ -245,10 +234,8 @@ int get_location_by_ip(const char *ip, struct location *loc_res)
     char line[100];
 
     snprintf(host, sizeof(host), "http://ip-api.com/line/%s?fields=status,message,continent,country,regionName,city,timezone,currency,org,mobile,proxy,query", ip);
-    if (send_request(host, &resp) < 0) {
-        printf("Error: get location by ip\n");
+    if (send_request(host, &resp) < 0)
         return -1;
-    }
 
     p = resp;
 
@@ -341,22 +328,6 @@ void my_packet_handler(const u_char *packet, unsigned long device_ip)
     cached_ip_insert(external_ip);
 
     print_ip_location(&loc);
-
-        /* here should be ipv6 processing AF_INET6 */
-//    else if (ntohs(eth_header->ether_type) == ETHERTYPE_ARP) {
-//         printf("ARP\n");
-//         printf ("Source: %d.%d.%d.%d\t\tDestination: %d.%d.%d.%d\n",
-//             arp_packet->arp_spa[0],
-//             arp_packet->arp_spa[1],
-//             arp_packet->arp_spa[2],
-//             arp_packet->arp_spa[3],
-//             arp_packet->arp_tpa[0],
-//             arp_packet->arp_tpa[1],
-//             arp_packet->arp_tpa[2],
-//             arp_packet->arp_tpa[3]);
-//     } else if (ntohs(eth_header->ether_type) == ETHERTYPE_REVARP) {
-//         printf("Reverse ARP\n");
-//     }
 }
 
 int main(int argc, char *argv[])
@@ -381,13 +352,13 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (!pcap_findalldevs(&it_device, error_buffer) || !it_device) {
+    if (!pcap_findalldevs(&it_device, error_buffer)
+        && !it_device) {
         printf("Error: finding device: %s\n", error_buffer);
         exit(EXIT_FAILURE);
     }
 
-    strncpy(device, it_device->name, sizeof(device));
-    printf("device pointer %p\n", (void*)it_device);
+    strcpy(device, it_device->name);
     pcap_freealldevs(it_device);
 
     handle = pcap_open_live(device, BUFSIZ, 0, 0, error_buffer);
@@ -397,23 +368,23 @@ int main(int argc, char *argv[])
     }
 
     if (pcap_datalink(handle) != DLT_EN10MB) {
-        printf("Error: %s\n", error_buffer);
+        printf("Error datalink: %s\n", error_buffer);
         exit(EXIT_FAILURE);
     }
 
-    if (!pcap_lookupnet(device, &netp, &maskp, error_buffer)) {
-        printf("Error: %s", error_buffer);
+    if (pcap_lookupnet(device, &netp, &maskp, error_buffer)) {
+        printf("Error lookupnet: %s", error_buffer);
         exit(EXIT_FAILURE);
     }
 
     printf("device name: %s, ip: %s\n", device, inet_ntoa((struct in_addr){.s_addr = netp}));
 
-    if (!pcap_compile(handle, &fp, filter, 0, maskp)) {
+    if (pcap_compile(handle, &fp, filter, 0, maskp)) {
         printf("Error: %s", pcap_geterr(handle));
         exit(EXIT_FAILURE);
     }
 
-    if (!pcap_setfilter(handle, &fp)) {
+    if (pcap_setfilter(handle, &fp)) {
         printf("Error: %s\n", pcap_geterr(handle));
         exit(EXIT_FAILURE);
     }
